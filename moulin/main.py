@@ -23,6 +23,7 @@ from moulin import build_generator
 from moulin.build_conf import MoulinConfiguration
 import moulin.rouge
 import moulin.rouge.block_entry
+from moulin.log_utils import build_handlers
 
 log = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ def _handle_shared_opts(description: str,
     loglevel = logging.INFO
     if args.verbose:
         loglevel = logging.DEBUG
-    logging.basicConfig(level=loglevel, format="[%(levelname)s] %(message)s")
+    logging.basicConfig(level=loglevel, handlers=build_handlers("[%(levelname)s] %(message)s"))
 
     local_conf_file = _get_conf_file(args.conf)
 
@@ -100,9 +101,11 @@ def _handle_shared_opts(description: str,
             raise Exception(f"Config file requires version {conf.min_ver}," +
                             f" while you are running moulin {our_ver}")
 
-    prog = f"{sys.argv[0]} {local_conf_file}"
+    _, exec_name = os.path.split(sys.argv[0])
+    prog = f"{exec_name} {local_conf_file}"
     desc = f"Config file description: {conf.desc}"
-    config_argparser = argparse.ArgumentParser(description=desc, prog=prog, add_help=False)
+    config_argparser = argparse.ArgumentParser(description=desc, prog=prog, add_help=False,
+                                               formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     for parameter in conf.get_parameters().values():
         config_argparser.add_argument(f"--{parameter.name}",
                                       choices=[x.name for x in parameter.variants.values()],
@@ -131,9 +134,9 @@ def moulin_entry():
     conf, args = _handle_shared_opts(
         f'Moulin meta-build system v{Version(importlib_metadata.version("moulin"))}',
         additional_opts=additional_opts)
-    log.info("Generating build.ninja")
 
     if not args.fetcherdep:
+        log.info("Generating build.ninja")
         build_generator.generate_build(conf, args.conf)
     else:
         log.info("Generating deps for component '%s'", args.fetcherdep[0])

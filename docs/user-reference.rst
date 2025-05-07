@@ -249,6 +249,8 @@ repositories. There is a full list of supported parameters:
   url: "url://for.repository/project.git"
   rev: revision_name
   dir: "directory/where/store/code"
+  depth: 1
+  submodules: true
 
 
 
@@ -262,6 +264,11 @@ repositories. There is a full list of supported parameters:
   cloning. If this option is missed, `moulin` will try to guess
   directory name from :code:`url`. This path is relative to
   component's build directory.
+* :code:`submodules` - optional - boolean. Fetch submodules along with
+  main repository.
+* :code:`depth` - optional - cloning depth. Corresponds to :code:`--depth`
+  option for :code:`git clone`. If used together with :code:`submodules`
+  enabled, it will call :code:`git`  with :code:`--shallow-submodules`
 
 repo fetcher
 ^^^^^^^^^^^^
@@ -296,6 +303,30 @@ list of supported options:
   initialize `repo` repository right in component's build directory,
   as this is a main `repo` use case.
 
+
+http fetcher
+^^^^^^^^^^^^^^
+
+`http` fetcher is used to download a file via HTTP or HTTPS protocol. It uses
+:code:`curl` tool to do so. Full list of supported options:
+
+.. code-block:: yaml
+
+  type: http # Selects `http` fetcher
+  url: "https://example.com/file.txt"
+  filename: "file.txt"
+  dir: "."
+
+* :code:`type` - mandatory - should be :code:`http` to use `http`
+  fetcher. Use the same type even if you are downloading over HTTPS
+  protocol.
+* :code:`url` - mandatory - URL of a file do be downloaded
+* :code:`filename` - optional (in most cases) - name of the output
+  file. If omitted, `moulin` will try to guess it from a URL. But if
+  can't do so, it will ask you to provide filename manually.
+* :code:`dir` - optional - directory name where store a downloaded
+  file. If it is omitted, `moulin` will use :code:`"."` to download a
+  file right into the component's root directory.
 
 unpack fetcher
 ^^^^^^^^^^^^^^
@@ -355,6 +386,20 @@ https://docs.zephyrproject.org/latest/develop/west/built-in.html#west-init
 
 Regarding installation of `west`, please see:
 https://docs.zephyrproject.org/latest/develop/west/install.html
+
+null fetcher
+^^^^^^^^^^^^
+
+`null` fetcher does nothing. It can be used for testing or in some
+tricky situation when you want to have component without fetchers.
+
+.. code-block:: yaml
+
+  type: "null" # Selects `none` fetcher
+
+* :code:`type` - mandatory - should be :code:`"null"` to use `null` fetcher.
+  Please note that you need to use quotes, otherwise YAML parser will
+  treat it as `null` type.
 
 Builders
 --------
@@ -442,10 +487,63 @@ needed if you are building multiple VMs with cross-dependencies.
 
 * :code:`external_src` - list of external sources for packages. This
   option will make `moulin` to generate
-  :code:`EXTERNALSRC_pn-{package}` in `local.conf`. This feature is
+  :code:`EXTERNALSRC:pn-{package}` in `local.conf`. This feature is
   used to provide Yocto build with artifacts that were built outside
   of the tree. Such artifacts can be provided by another component,
   for example.
+
+bazel builder
+^^^^^^^^^^^^^
+
+Bazel builder is used to build projects based on the Bazel build system
+provided by Google. It expects that a project with source and bazel
+configuration files is present in the build directory.
+
+.. code-block:: yaml
+
+  builder:
+    type: "bazel"         # Mandatory and must be `bazel`
+    tool: "tools/bazel"   # Optional
+    startup-options:      # Optional
+      - "--max_idle_secs=1"
+    command: run          # Optional
+    args:                 # Optional
+      - "--verbose_failures"
+      - "--sandbox_debug"
+    target:               # Mandatory
+    target-patterns:      # Optional
+      - "--dist_dir=path_to_dist"
+    target_images:        # Mandatory
+      - "out/deploy/virtual-device/virtual_device_aarch64/Image"
+      - "out/deploy/virtual-device/virtual_device_aarch64/initramfs.img"
+
+Mandatory parameters:
+
+* :code:`type` - Builder type. It must be :code:`bazel` for this type
+  of builder.
+
+* :code:`target` - target name that should be described in the
+  corresponding BUILD.bazel file and must satisfy bazel rules.
+
+* :code:`target_images` - list of artifact files that should be generated
+  by this component as a result of the build.
+  Every component should generate at least one image file.
+
+Optional parameters:
+
+* :code:`tool` - the relative path to the Bazel tool in relation to the
+  'build-dir'. If this parameter is not defined, the system-installed
+  Bazel tool will be used.
+
+* :code:`startup-options` - bazel startup options that appear before
+  the command and are parsed by the client.
+
+* :code:`command` - bazel command. By default, :code:`build` is used.
+
+* :code:`args` - bazel arguments related to the concrete :code:`command`.
+
+* :code:`target-patterns` - bazel target patterns to be built or
+  parameters to executable target.
 
 android builder
 ^^^^^^^^^^^^^^^
@@ -529,7 +627,7 @@ Optional parameters:
 archive builder
 ^^^^^^^^^^^^^^^
 
-Archive builder does is intended to create archive from other components.
+Archive builder is intended to create an archive from other components.
 It can be used to gather build artifacts, for example. This builder
 uses `tar` to create archive files. Archives can be optionally compressed
 as, `tar` is invoked with `--auto-compress` option.
@@ -537,25 +635,33 @@ as, `tar` is invoked with `--auto-compress` option.
 .. code-block:: yaml
 
   builder:
-    type: archive        # Should be 'artchive'
-    name: "artifacts.tar.bz"
+    type: archive        # Should be 'archive'
+    name: "artifacts.tar.bz2"
+    base_dir: "yocto/build/tmp/deploy/images/"
     items:
-      - "yocto/build/tmp/deploy/images/generic-armv8-xt/Image"
-      - "yocto/build/tmp/deploy/images/generic-armv8-xt/uInitramfs"
+      # items are relative to base_dir
+      - "generic-armv8-xt/Image"
+      - "generic-armv8-xt/uInitramfs"
 
 Mandatory options:
 
-* :code:`type` - Builder type. Should be :code:`archive` for this type
+* :code:`type` - Builder type. It should be :code:`archive` for this type
   of builder.
 
-* :code:`name` - Name of archive file. Add suffix like `tar.bz2` to
+* :code:`name` - Name of an archive file. Add a suffix like `tar.bz2` to
   make `tar` compress archive with desired compressing algorithm.
 
+* :code:`base_dir` - Optional parameter specifying `tar`'s base directory.
+  The default value is "." if not specified. This is passed to `tar` as
+  `-C` option. As result, the final archive will contain paths relative
+  to :code:`base_dir`. Avoid using `..` because specified items will be
+  archived by `tar` but all `..` will be stripped. As a result, the archive
+  will contain items with unexpected paths.
+
 * :code:`items` - list of files or directories that should be added
-  do the archive. Please ensure that those files or directories present
+  to the archive. Please ensure that those files or directories are present
   in other components :code:`target_images` sections, so Ninja can
-  build correct dependencies. All paths are relative to base build
-  directory (where .yaml file resides).
+  build correct dependencies. All paths are relative to the :code:`base_dir`.
 
 zephyr builder
 ^^^^^^^^^^^^^^
@@ -569,11 +675,19 @@ to be fetched by `west` fetcher.
   builder:
     type: zephyr
     board: xenvm
+    shields:          # Optional
+      - "shield1"
+      - "shield2"
     target: samples/synchronization
+    work_dir: build_dir
     target_images:
       - "zephyr/build/zephyr/zephyr.bin"
+    vars:
+      - "VAR1=var1_value"
     env:
       - "MY_ENV_VAR=my_value"
+    additional_deps:  # Optional
+      - "path/to/file/generated/by/other/component"
 
 
 Mandatory options:
@@ -598,9 +712,109 @@ Optional parameters:
 * :code:`env` - list of additional environment variables that should
   be exported before calling :code:`west build`.
 
+* :code:`work_dir` - build system's work directory. Default value is
+  "build". This is where files produced by build system are stored.
+
+* :code:`additional_deps` - list of additional dependencies. This is
+  basically :code:`target_images` produced by other components. You
+  can use those to implement build dependencies between
+  components. For example, if your system needs to have DomU's kernel
+  image in your zephyr image, you might want to add path to DomU's
+  kernel into :code:`additional_deps` of zephyr's config. This will
+  ensure that zephyr will be built **after** DomU.
+
+* :code:`shields` - list of shields should be integrated to zephyr board(For Zephyr < 3.4.0).
+
+* :code:`snippets` - list of snippets should be integrated to zephyr board(For Zephyr >= 3.4.0).
+  Please note that only one of :code:`shields` and :code:`snippets` can be used at the same time.
+
+* :code:`vars` - list of additional variables that should be passed to cmakw
+  via :code:`west build`.
+
 Please note that this builder uses :code:`--pristine=auto` command-line option.
 
 Proper versions of CMake and Zephyr SDK have to be installed on the host.
 
 For additional details please see
 https://docs.zephyrproject.org/latest/develop/west/build-flash-debug.html#building-west-build
+
+custom_script builder
+^^^^^^^^^^^^^^^^^^^^^
+
+Custom-script builder is intended to perform custom actions. This builder
+actually calls script pointed in option :code:`script`. Builder node
+is stored in the file in :code:`work_dir` directory and that file passed to the
+script as parameter
+
+.. code-block:: yaml
+
+  builder:
+    type: custom_script        # Should be 'custom_script'
+    work_dir : "script_workdir"
+    script: "path/to/script/custom_script.py"
+    args:
+      - "argument1"
+      - "argument2"
+    config:
+      items:
+        "rootfs": "images/spider/rootfs.tar.bz2"
+      manifest:
+        "id": ""
+        "vendorVersion": "0.2.0"
+        "fileName": "archive.squashfs"
+        "description": "DomD image"
+        "bundleType": "full"
+    target_images:
+      - "custom_script_targets"
+    additional_deps:  # Optional
+      - "path/to/file_name"
+
+Mandatory options:
+
+* :code:`type` - Builder type. It should be :code:`custom_script` for this type
+  of builder.
+
+* :code:`work_dir` - build script work directory. Default value is "script_workdir".
+  This is where files produced by build system are stored.
+
+* :code:`script` - path to script which performs custom actions. Whole yaml node will
+  be stored to file and name of that file will be passed to :code:`script` as last command
+  line argument
+
+* :code:`target_images` - list of files that should be generated by script.
+
+Optional parameters:
+
+* :code:`args` - additional arguments should be passed to :code:`script`. Can be passed as
+  string or list
+
+* :code:`additional_deps` - list of additional dependencies. This is
+  basically :code:`target_images` produced by other components. You
+  can use those to implement build dependencies between
+  components. For example, if your system needs to have DomU's kernel
+  image for your fota archive, you might want to add path to DomU's
+  kernel into :code:`additional_deps` of Dom0's config. This will
+  ensure that fota archive will be built **after** DomU.
+
+* Remaining parameters should be parsed and used by script pointed in
+  :code:`script` option.
+
+
+null builder
+^^^^^^^^^^^^
+
+"null" builder does nothing at all. It even does not generate
+dependencies. It can be used for testing or in cases when you need to
+call fetcher only. Please note that Ninja will not call fetcher for
+the component if fetcher's output file is not used by anything.
+
+.. code-block:: yaml
+
+  builder:
+    type: "null"        # Should be "null"
+
+Mandatory options:
+
+* :code:`type` - Builder type. It should be :code:`"null"` for this type
+  of builder. Please note that you need to use quotes, otherwise YAML parser will
+  treat it as `null` type.

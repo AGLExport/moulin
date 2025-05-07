@@ -11,6 +11,11 @@ from moulin.utils import create_stamp_name, construct_fetcher_dep_cmd
 from moulin import ninja_syntax
 from moulin.yaml_wrapper import YamlValue
 from moulin.yaml_helpers import YAMLProcessingError
+import logging
+
+
+YOCTO_CORE_LAYERS = ["../poky/meta", "../poky/meta-poky", "../poky/meta-yocto-bsp"]
+log = logging.getLogger(__name__)
 
 
 def get_builder(conf: YamlValue, name: str, build_dir: str, src_stamps: List[str],
@@ -93,11 +98,76 @@ def _flatten_yocto_conf(conf: YamlValue) -> List[Tuple[str, str]]:
     result: List[Tuple[str, str]] = []
     for entry in conf:
         if not entry.is_list:
-            raise YAMLProcessingError("Exptected array on 'conf' node", entry.mark)
+            raise YAMLProcessingError("Expected array on 'conf' node", entry.mark)
         if entry[0].is_list:
             result.extend([(x[0].as_str, x[1].as_str) for x in entry])
         else:
             result.append((entry[0].as_str, entry[1].as_str))
+    return result
+
+
+def _flatten_layers(layers_node: YamlValue) -> List[str]:
+    """
+Flattens a YAML structure representing layers into a list of strings.
+This function takes a YAML node representing layers and flattens it into a list of strings.
+It processes the input YAML structure, extracting individual layer names as strings and adding
+them to the resulting list.
+Args:
+    layers_node (YamlValue): The YAML node, represents a list of layers.
+Returns:
+    List[str]: A list of strings, each string represents a layer name.
+Example:
+    If `layers_node` is a YAML list like this:
+    -
+     - nested_layer1
+     - nested_layer2
+    - layer3
+    - layer4
+    The function will return ['nested_layer1', 'nested_layer2', 'layer3', 'layer4']
+"""
+    result: List[str] = []
+    for entry in layers_node:
+        if entry.is_list:
+            result.extend([(x.as_str) for x in entry])
+        else:
+            result.append((entry.as_str))
+    return result
+
+
+def _filter_yocto_core_layers(layers: List[str]) -> List[str]:
+    """
+By default, Poky adds the following layers:
+
+"meta"
+"meta-poky"
+"meta-yocto-bsp"
+
+For more details, you can find information about it here:
+https://github.com/yoctoproject/poky/blob/807831067405a465886593df4e3057d3846a0001/documentation/
+migration-guides/migration-1.3.rst#bblayersconf
+and here:
+poky/meta-poky/conf/bblayers.conf.sample
+
+This function checks the list of layers in your Yaml configuration. If it finds Poky default layers,
+it outputs a corresponding warning to the user. Such layers will be removed from the final list since
+Poky adds them by default on its level.
+
+Please, be aware, that the warning in this function will be changed to an exception soon. Please, adapt
+your YAML Moulin configuration files.
+
+    Args:
+    - _layers (List[str]): A list of layers to filter.
+
+    Returns:
+    - List[str]: A filtered list of layers without the ones added by the Poky by default.
+"""
+    result: List[str] = []
+    for layer in layers:
+        if layer in YOCTO_CORE_LAYERS:
+            log.warning("You explicitly specified the %s layer. This layer is the default layer in Poky."
+                        " Please, remove this layer from your YAML configuration.", layer)
+        else:
+            result.append(layer)
     return result
 
 
@@ -132,7 +202,7 @@ class YoctoBuilder:
             else:
                 path = val_node.as_str
             path = os.path.abspath(path)
-            ret.append((f"EXTERNALSRC_pn-{key}", path))
+            ret.append((f"EXTERNALSRC:pn-{key}", path))
 
         return ret
 
@@ -154,7 +224,7 @@ class YoctoBuilder:
         layers_node = self.conf.get("layers", None)
         if layers_node:
             layers_stamp = create_stamp_name(self.yocto_dir, self.work_dir, "yocto", "layers")
-            layers = " ".join([x.as_str for x in layers_node])
+            layers = " ".join(_filter_yocto_core_layers(_flatten_layers(layers_node)))
             self.generator.build(layers_stamp,
                                  "yocto_add_layers",
                                  env_target,

@@ -17,7 +17,11 @@ def _run_cmd(args):
 
 
 # pylint: disable=invalid-name
-def dd(file_in: Union[str, BinaryIO], file_out: BinaryIO, out_offset: int, out_size: Optional[int] = None):
+def dd(file_in: Union[str, BinaryIO],
+       file_out: BinaryIO,
+       out_offset: int,
+       out_size: Optional[int] = None,
+       sparse: bool = True):
     "Run dd with the given arguments"
     # Try to guess block size. We would like to use as big block as
     # possible. But we need take into account that "seek" parameter
@@ -37,9 +41,10 @@ def dd(file_in: Union[str, BinaryIO], file_out: BinaryIO, out_offset: int, out_s
         f"bs={blocksize}",
         f"seek={out_offset // blocksize}",
         "status=progress",
-        "conv=sparse",
         "conv=notrunc",
     ]  # yapf: disable
+    if sparse:
+        args.append("conv=sparse")
     if out_size:
         args.append(f"count={out_size // blocksize}")
     _run_cmd(args)
@@ -69,9 +74,13 @@ def mkext4fs(file_out: BinaryIO, contents_dir=None):
     _run_cmd(args)
 
 
-def mkvfatfs(file_out: BinaryIO):
-    "Create ext4 fs in given file"
-    args = ["mkfs.vfat", file_out.name]
+def mkvfatfs(file_out: BinaryIO, sector_size=None):
+    "Create FAT fs in given file"
+    args = ["mkfs.vfat"]
+    if sector_size:
+        args.append("-S")
+        args.append(str(sector_size))
+    args.append(file_out.name)
 
     _run_cmd(args)
 
@@ -87,5 +96,15 @@ def mmd(img: BinaryIO, folders: list):
     "Create directories inside a vfat image"
     args = ["mmd", "-i", img.name]
     args.extend(folders)
+
+    _run_cmd(args)
+
+
+def resize2fs(img: str, size: Optional[int] = None):
+    "Resize fs image to the given size"
+    args = ["resize2fs", img]
+
+    if size:
+        args.append(str(size))
 
     _run_cmd(args)

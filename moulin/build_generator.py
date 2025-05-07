@@ -27,6 +27,8 @@ def generate_build(conf: MoulinConfiguration,
     """
     generator = ninja_syntax.Writer(open(ninja_build_fname, 'w'), width=120)
 
+    generator.variable("ninja_required_version", "1.10")
+
     _gen_regenerate(conf_file_name, generator)
 
     rouge.gen_build_rules(generator)
@@ -98,11 +100,11 @@ def generate_fetcher_dyndep(conf: MoulinConfiguration, component: str):
 
 
 def _gen_regenerate(conf_file_name, generator: ninja_syntax.Writer):
-    this_script = os.path.abspath(sys.argv[0])
+    this_script = os.path.basename(sys.argv[0])
     args = " ".join(sys.argv[1:])
     generator.rule("regenerate", command=f"{this_script} {args}", generator=1)
     generator.newline()
-    generator.build(BUILD_FILENAME, "regenerate", [this_script, conf_file_name])
+    generator.build(BUILD_FILENAME, "regenerate", conf_file_name)
     generator.newline()
 
 
